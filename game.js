@@ -23,7 +23,7 @@ scene.background = (() => {
   g.fillStyle = gr; g.fillRect(0, 0, 4, 256);
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; return t;
 })();
-const camera = new THREE.PerspectiveCamera(70, 1, 0.1, 3000);
+const camera = new THREE.PerspectiveCamera(70, 1, 0.3, 3000);
 
 scene.add(new THREE.HemisphereLight(0xd6e4ff, 0x6b5a48, 1.7));
 const sunLight = new THREE.DirectionalLight(0xffd6b0, 2.2);
@@ -144,6 +144,17 @@ const BUILD = {
     wheels(g, [-1.05, 1.05], [-3.7, 1.8, 3.4], 0.52, 0.42); blob(g, 2.5, 9.8);
     return { group: g, w: 2.5, l: 9.8, color: tr };
   },
+  bus() {
+    const g = new THREE.Group(), c = pick([0xf4c430, 0x1d4e89, 0xe9e9e9, 0xc1121f, 0x2a9d8f]);
+    box(g, 2.5, 2.8, 12, c, 0, 1.9, 0);
+    box(g, 2.54, 0.95, 10.4, GLASS, 0, 2.45, 0.5);
+    box(g, 2.3, 1.3, 0.1, GLASS, 0, 2.3, -6.02);
+    box(g, 2.52, 0.18, 12.02, 0xffffff, 0, 1.55, 0);
+    box(g, 2.2, 0.35, 3.5, 0xbfbfbf, 0, 3.45, 1.5);
+    lights(g, 2.5, 0.95, -6.03, 6.03);
+    wheels(g, [-1.1, 1.1], [-4.2, 3.8], 0.55, 0.4); blob(g, 2.6, 12.2);
+    return { group: g, w: 2.5, l: 12, color: c };
+  },
   moto() {
     const g = new THREE.Group(), c = pick([0xd62828, 0x111111, 0xf77f00, 0x3a86ff, 0x2a9d8f]);
     box(g, 0.32, 0.4, 1.4, c, 0, 0.75, 0);
@@ -241,6 +252,166 @@ for (let i = 0; i < 110; i++) {
 }
 function placeTree(g, z) { g.position.set(pick([-1, 1]) * rand(15, 80), 0, z); }
 
+// ---------- roadside detail ----------
+const side = () => pick([-1, 1]);
+const m4 = new THREE.Matrix4(), q4 = new THREE.Quaternion(), yAxis = new V3(0, 1, 0);
+const ROOF = new THREE.ConeGeometry(0.75, 1, 4).rotateY(Math.PI / 4);
+const CYL = new THREE.CylinderGeometry(1, 1, 1, 14);
+const TOWER = new THREE.CylinderGeometry(0.5, 1.1, 1, 10);
+const ROCK = new THREE.DodecahedronGeometry(0.5, 0);
+
+// gravel strip behind the guard rails + wooden fences, all snapped with the road
+for (const s of [-1, 1]) {
+  const gravel = new THREE.Mesh(PLANE, mat(0x8c7d68));
+  gravel.rotation.x = -Math.PI / 2; gravel.scale.set(3, ROAD_LEN, 1); gravel.position.set(s * 12.5, -0.02, 0);
+  roadGroup.add(gravel);
+  const fx = s * 17;
+  for (const y of [0.55, 1.05]) box(roadGroup, 0.08, 0.12, ROAD_LEN, 0x8b6b4a, fx, y, 0);
+  const fp = new THREE.InstancedMesh(BOX, mat(0x6f5238), ROAD_LEN / 6);
+  for (let i = 0; i < ROAD_LEN / 6; i++) {
+    m4.compose(new V3(fx, 0.6, -ROAD_LEN / 2 + i * 6), q4.identity(), new V3(0.16, 1.3, 0.16)); fp.setMatrixAt(i, m4);
+  }
+  roadGroup.add(fp);
+}
+// power line on the right, poles every 72 m (same period as the road snap)
+{
+  const n = ROAD_LEN / 72, px = 30;
+  const poles = new THREE.InstancedMesh(BOX, mat(0x5e4b3c), n), arms = new THREE.InstancedMesh(BOX, mat(0x5e4b3c), n);
+  for (let i = 0; i < n; i++) {
+    const z = -ROAD_LEN / 2 + i * 72;
+    m4.compose(new V3(px, 5.5, z), q4.identity(), new V3(0.35, 11, 0.35)); poles.setMatrixAt(i, m4);
+    m4.compose(new V3(px, 10.4, z), q4.identity(), new V3(3.6, 0.22, 0.22)); arms.setMatrixAt(i, m4);
+  }
+  roadGroup.add(poles, arms);
+  for (const dx of [-1.6, 0, 1.6]) box(roadGroup, 0.04, 0.04, ROAD_LEN, 0x222222, px + dx, dx === 0 ? 10.9 : 10.5, 0);
+}
+
+const props = [];
+function prop(obj, place, margin = 40) { place(obj, -Math.random() * SPAN); scene.add(obj); props.push({ obj, place, margin }); }
+
+function makeHouse() {
+  const g = new THREE.Group(), w = rand(6, 10), d = rand(6, 9), h = rand(3, 5.5);
+  box(g, w, h, d, pick([0xe9dcc9, 0xd4a373, 0xf1e3b4, 0xc9d6df, 0xe5989b, 0xfafafa, 0xb7b7a4, 0x9fb8ad]), 0, h / 2, 0);
+  const roof = new THREE.Mesh(ROOF, mat(pick([0x6d3b2a, 0x3d405b, 0x8d2f23, 0x4a4e69, 0x5c4033])));
+  roof.scale.set(w, rand(2, 3.4), d); roof.position.y = h + roof.scale.y / 2; g.add(roof);
+  for (const i of [-1, 1]) {
+    const lit = Math.random() < 0.5;
+    box(g, 0.08, 1.1, 1.3, lit ? 0x6b5030 : 0x2b3a4f, w / 2 + 0.02, h * 0.58, i * d * 0.28, lit ? 0x8a5a20 : 0);
+  }
+  box(g, 0.08, 2.0, 1.0, 0x5b3a29, w / 2 + 0.02, 1.0, 0);
+  box(g, 0.7, 2.2, 0.7, 0x7f5539, w * 0.22, h + 1.3, d * 0.2);
+  box(g, 0.1, 0.9, d + 6, 0xf5f5f5, w / 2 + 4, 0.45, 0); // picket fence out front
+  return g;
+}
+function makeFarm() {
+  const g = new THREE.Group(), w = rand(9, 12), d = rand(14, 18), h = rand(5, 7);
+  box(g, w, h, d, pick([0xa4161a, 0x8c2f39, 0x9d0208]), 0, h / 2, 0);
+  const roof = new THREE.Mesh(ROOF, mat(0x3b3b3b)); roof.scale.set(w * 1.05, 4, d * 1.02); roof.position.y = h + 2; g.add(roof);
+  box(g, 0.1, 4, 4, 0xf1f1f1, w / 2 + 0.02, 2, 0);
+  box(g, 0.12, 0.3, 5.4, 0xf1f1f1, w / 2 + 0.05, 2, 0).rotation.x = 0.75;
+  box(g, 0.12, 0.3, 5.4, 0xf1f1f1, w / 2 + 0.05, 2, 0).rotation.x = -0.75;
+  const silo = new THREE.Mesh(CYL, mat(0xb8c0c8)); silo.scale.set(2.2, 14, 2.2); silo.position.set(-1, 7, -d / 2 - 3); g.add(silo);
+  const cap = new THREE.Mesh(SPHERE, mat(0x8d99ae)); cap.scale.setScalar(4.4); cap.position.set(-1, 14, -d / 2 - 3); g.add(cap);
+  return g;
+}
+function signTex(lines, bg, fg, w = 512, h = 256, border = '#fff') {
+  const c = document.createElement('canvas'); c.width = w; c.height = h; const g = c.getContext('2d');
+  g.fillStyle = bg; g.fillRect(0, 0, w, h);
+  g.strokeStyle = border; g.lineWidth = 10; g.strokeRect(14, 14, w - 28, h - 28);
+  g.fillStyle = fg; g.textAlign = 'center'; g.textBaseline = 'middle';
+  lines.forEach(([t, size], i) => { g.font = `900 italic ${size}px Arial Black, Arial, sans-serif`; g.fillText(t, w / 2, h * (i + 1) / (lines.length + 1)); });
+  const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; return t;
+}
+const BILLBOARDS = [
+  signTex([['REDLINE RUSH', 64], ['FLAT OUT SINCE 2026', 30]], '#e0201a', '#fff'),
+  signTex([["JOE'S DINER", 70], ['BURGERS · SHAKES · EXIT 12', 28]], '#ffd166', '#3a1d0e', 512, 256, '#3a1d0e'),
+  signTex([['MOTEL', 80], ['VACANCY · POOL · 2 km', 30]], '#1d3557', '#f1faee'),
+  signTex([['SLOW DOWN?', 66], ['NEVER.', 54]], '#111', '#ffd166', 512, 256, '#ffd166'),
+  signTex([['SUNSET CITY', 66], ['48 km', 48]], '#2a9d8f', '#fff'),
+  signTex([['FRESH PEACHES', 58], ['NEXT RIGHT', 36]], '#f4a261', '#fff'),
+].map((t) => new THREE.MeshLambertMaterial({ map: t }));
+function makeBillboard() {
+  const g = new THREE.Group();
+  for (const x of [-2.2, 2.2]) box(g, 0.3, 6.5, 0.3, 0x55595f, x, 3.25, -0.3);
+  box(g, 6.6, 3.4, 0.25, 0x33363b, 0, 7.4, -0.2);
+  const face = new THREE.Mesh(PLANE, pick(BILLBOARDS)); face.scale.set(6.3, 3.1, 1); face.position.set(0, 7.4, -0.06); g.add(face);
+  box(g, 6.6, 0.12, 0.8, 0x55595f, 0, 5.65, 0.1);
+  return g;
+}
+const GANTRY_SIGNS = [
+  signTex([['EXIT 27 ↗', 70], ['AIRPORT · HARBOR', 40]], '#0b6e3a', '#fff'),
+  signTex([['SUNSET CITY', 64], ['CENTER  ↑  32 km', 40]], '#0b6e3a', '#fff'),
+  signTex([['I-99 WEST', 70], ['DESERT ROAD', 40]], '#0b6e3a', '#fff'),
+].map((t) => new THREE.MeshLambertMaterial({ map: t }));
+function makeGantry() {
+  const g = new THREE.Group();
+  for (const x of [-12.6, 12.6]) box(g, 0.45, 7.8, 0.45, 0x8a8f99, x, 3.9, 0);
+  box(g, 25.6, 0.5, 0.5, 0x8a8f99, 0, 7.6, 0);
+  box(g, 25.6, 0.25, 0.25, 0x8a8f99, 0, 6.9, 0);
+  for (const [x, rot] of [[4, 0], [-4, Math.PI]]) {
+    const s = new THREE.Group(); s.position.set(x, 7.3, 0); s.rotation.y = rot; g.add(s);
+    box(s, 6.6, 3.0, 0.2, 0xdddddd, 0, 0, 0);
+    const f = new THREE.Mesh(PLANE, pick(GANTRY_SIGNS)); f.scale.set(6.4, 2.8, 1); f.position.z = 0.11; s.add(f);
+  }
+  return g;
+}
+const turbines = [];
+function makeTurbine() {
+  const g = new THREE.Group(), h = rand(45, 65);
+  const tower = new THREE.Mesh(TOWER, mat(0xf2f2f2)); tower.scale.set(1, h, 1); tower.position.y = h / 2; g.add(tower);
+  box(g, 1.6, 1.6, 4, 0xe8e8e8, 0, h, 0);
+  const rotor = new THREE.Group(); rotor.position.set(0, h, 2.1); g.add(rotor);
+  for (let i = 0; i < 3; i++) { const b = box(rotor, 0.9, h * 0.42, 0.25, 0xffffff, 0, h * 0.21, 0); const arm = new THREE.Group(); arm.rotation.z = (i * Math.PI * 2) / 3; arm.add(b); rotor.add(arm); }
+  rotor.rotation.z = rand(0, 6); turbines.push({ rotor, spd: rand(0.8, 1.4) });
+  return g;
+}
+const fieldTex = (() => {
+  const c = document.createElement('canvas'); c.width = 64; c.height = 64; const g = c.getContext('2d');
+  g.fillStyle = '#fff'; g.fillRect(0, 0, 64, 64); g.fillStyle = 'rgba(0,0,0,.22)';
+  for (let x = 0; x < 64; x += 8) g.fillRect(x, 0, 3, 64);
+  const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; return t;
+})();
+function makeField() {
+  const m = new THREE.Mesh(PLANE, new THREE.MeshLambertMaterial({
+    color: pick([0xd9b44a, 0x9cbf4f, 0x7a5a3a, 0xb59ad6, 0xc7d36f, 0x6fa84a]), map: fieldTex.clone(),
+    polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -4,
+  }));
+  m.material.map.needsUpdate = true;
+  m.rotation.x = -Math.PI / 2; const w = rand(50, 120), l = rand(80, 200);
+  m.scale.set(w, l, 1); m.material.map.repeat.set(w / 5, 1); m.userData.w = w;
+  return m;
+}
+
+for (let i = 0; i < 16; i++) prop(makeHouse(), (g, z) => { const s = side(); g.position.set(s * rand(30, 90), 0, z); g.rotation.y = (s > 0 ? Math.PI : 0) + rand(-0.3, 0.3); });
+for (let i = 0; i < 4; i++) prop(makeFarm(), (g, z) => { const s = side(); g.position.set(s * rand(60, 130), 0, z); g.rotation.y = (s > 0 ? Math.PI : 0) + rand(-0.4, 0.4); });
+for (let i = 0; i < 6; i++) prop(makeBillboard(), (g, z) => { const s = side(); g.position.set(s * rand(19, 26), 0, z); g.rotation.y = -s * 0.45; });
+for (let i = 0; i < 2; i++) prop(makeGantry(), (g, z) => { g.position.set(0, 0, z); });
+for (let i = 0; i < 7; i++) prop(makeTurbine(), (g, z) => { const s = side(); g.position.set(s * rand(140, 320), 0, z); g.rotation.y = rand(-0.4, 0.4); }, 200);
+for (let i = 0; i < 18; i++) prop(makeField(), (m, z) => { const s = side(); m.position.set(s * (36 + m.userData.w / 2 + rand(0, 80)), 0.01, z); }, 150);
+for (let i = 0; i < 12; i++) {
+  const hill = new THREE.Mesh(SPHERE, mat(pick([0x6e8a45, 0x7d9a50, 0x5f7d3e, 0x8a9a55])));
+  hill.scale.set(rand(160, 400), rand(30, 80), rand(200, 500));
+  prop(hill, (m, z) => { m.position.set(side() * rand(260, 600), -8, z); }, 400);
+}
+
+// instanced bushes, rocks and wildflowers (cheap, lots of them)
+const scatters = [];
+function scatter(geo, colors, count, xr, size, yk) {
+  const im = new THREE.InstancedMesh(geo, new THREE.MeshLambertMaterial({ color: 0xffffff }), count);
+  im.frustumCulled = false; const zs = new Float32Array(count); const col = new THREE.Color();
+  const set = (i) => {
+    const s = rand(size[0], size[1]);
+    q4.setFromAxisAngle(yAxis, rand(0, 6.28));
+    m4.compose(new V3(side() * rand(xr[0], xr[1]), s * yk, zs[i]), q4, new V3(s * rand(0.8, 1.5), s * rand(0.7, 1), s * rand(0.8, 1.5)));
+    im.setMatrixAt(i, m4); im.setColorAt(i, col.set(pick(colors)));
+  };
+  for (let i = 0; i < count; i++) { zs[i] = -Math.random() * SPAN; set(i); }
+  scene.add(im); scatters.push({ im, zs, set });
+}
+scatter(SPHERE, [0x4f7a3a, 0x3d6b35, 0x5d8a3f, 0x6b8e3d, 0x2f5a35], 220, [13.8, 45], [0.9, 2.6], 0.3);
+scatter(ROCK, [0x8d8d8d, 0x7a7068, 0xa39e93], 70, [14, 70], [0.6, 2.2], 0.25);
+scatter(BOX, [0xffd166, 0xffffff, 0xef476f, 0xb5179e, 0xf8f9fa], 260, [13.5, 30], [0.12, 0.22], 0.5);
+
 const far = new THREE.Group(); scene.add(far);
 for (let i = 0; i < 18; i++) {
   const m = new THREE.Mesh(CONE, new THREE.MeshBasicMaterial({ color: pick([0x8a6f9e, 0x9c7aa0, 0x7d6a99]), fog: false }));
@@ -327,6 +498,17 @@ function sfxCrash(power) {
     m.connect(mg); mg.connect(ac.destination); m.start(t); m.stop(ts + 0.15);
   }
 }
+function sfxHit() {
+  if (!ac) return; const t = ac.currentTime;
+  const o = ac.createOscillator(), og = ac.createGain(); o.type = 'sine';
+  o.frequency.setValueAtTime(160, t); o.frequency.exponentialRampToValueAtTime(45, t + 0.25);
+  og.gain.setValueAtTime(0.7, t); og.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
+  o.connect(og); og.connect(ac.destination); o.start(t); o.stop(t + 0.32);
+  const n = ac.createBufferSource(); n.buffer = noiseBuf(0.3);
+  const f = ac.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 1500;
+  const g = ac.createGain(); g.gain.setValueAtTime(0.35, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
+  n.connect(f); f.connect(g); g.connect(ac.destination); n.start(t);
+}
 function sfxWhoosh() {
   if (!ac) return; const t = ac.currentTime;
   const n = ac.createBufferSource(); n.buffer = noiseBuf(0.5);
@@ -370,15 +552,19 @@ canvas.addEventListener('touchmove', (e) => { touchX = e.touches[0].clientX; e.p
 canvas.addEventListener('touchend', (e) => { touching = e.touches.length; if (touching) touchX = e.touches[0].clientX; });
 canvas.addEventListener('touchcancel', () => { touching = 0; });
 
-function readSteer() {
-  let s = 0;
-  if (keys.ArrowLeft || keys.KeyA) s -= 1;
-  if (keys.ArrowRight || keys.KeyD) s += 1;
+let keySteer = 0;
+function readSteer(dt) {
+  let k = 0;
+  if (keys.ArrowLeft || keys.KeyA) k -= 1;
+  if (keys.ArrowRight || keys.KeyD) k += 1;
+  keySteer += (k - keySteer) * Math.min(1, dt * (k === 0 ? 8 : 3.5)); // keys ease in instead of snapping
+  let s = Math.abs(keySteer) > 0.02 ? keySteer : 0;
   if (s === 0 && tiltRaw != null) {
     let d = tiltRaw - tiltZero;
     if (d > 180) d -= 360; if (d < -180) d += 360;
-    d = Math.abs(d) < 1.5 ? 0 : d - Math.sign(d) * 1.5;
-    s = clamp(d / 20, -1, 1);
+    d = Math.abs(d) < 2.5 ? 0 : d - Math.sign(d) * 2.5;
+    s = clamp(d / 32, -1, 1);
+    s = Math.sign(s) * Math.abs(s) ** 1.4; // gentle near center, full lock at ~35°
   } else if (s === 0 && tiltRaw == null && touching) {
     s = touchX < innerWidth / 2 ? -1 : 1; // no gyro: touch halves steer
   }
@@ -417,8 +603,8 @@ function spawnRow(diff) {
     const x = lanes[i], onc = x < 0;
     if (traffic.some((t) => Math.abs(t.x - x) < 1 && Math.abs(t.group.position.z - z) < 22)) continue;
     const r = Math.random();
-    const kind = r < 0.5 ? 'car' : r < 0.64 ? 'suv' : r < 0.74 ? 'van' : r < 0.86 ? 'truck' : 'moto';
-    const base = kind === 'truck' ? rand(17, 22) : kind === 'moto' ? rand(26, 34) : rand(20, 30);
+    const kind = r < 0.44 ? 'car' : r < 0.56 ? 'suv' : r < 0.65 ? 'van' : r < 0.75 ? 'truck' : r < 0.83 ? 'bus' : 'moto';
+    const base = kind === 'truck' || kind === 'bus' ? rand(17, 22) : kind === 'moto' ? rand(26, 34) : rand(20, 30);
     const vz = onc ? base + diff * 8 : -base;
     spawnVehicle(x + (kind === 'moto' ? rand(-0.8, 0.8) : 0), z, vz, kind);
   }
@@ -468,7 +654,7 @@ function explode(group, vSelf, vOther, rel, mix, isPlayer) {
   group.updateMatrixWorld(true);
   const center = group.position.clone();
   const children = [...group.children];
-  let first = null;
+  const list = [];
   for (const ch of children) {
     if (ch.userData.noBreak) continue;
     scene.attach(ch);
@@ -479,10 +665,10 @@ function explode(group, vSelf, vOther, rel, mix, isPlayer) {
     v.y += rand(3, 6 + Math.min(rel * 0.2, 24));
     const sz = new THREE.Box3().setFromObject(ch).getSize(new V3());
     const p = { obj: ch, v, w: new V3(rand(-1, 1), rand(-1, 1), rand(-1, 1)).multiplyScalar(rand(3, 12)), r: Math.max(0.08, Math.min(sz.x, sz.y, sz.z) * 0.5) };
-    parts.push(p); if (!first) first = p;
+    parts.push(p); list.push(p);
   }
   scene.remove(group);
-  return first;
+  return list;
 }
 function debris(pos, vel, colors, n, rel) {
   for (let i = 0; i < n; i++) {
@@ -496,6 +682,25 @@ function debris(pos, vel, colors, n, rel) {
     parts.push({ obj: m, v, w: new V3(rand(-20, 20), rand(-20, 20), rand(-20, 20)), r: s * 0.3 });
   }
 }
+function knockAway(t) {
+  const pv = new V3(P.vx, 0, -P.speed), ov = new V3(0, 0, t.vz), rel = pv.distanceTo(ov);
+  const s = Math.sign(t.group.position.x - P.x) || side();
+  const at = t.group.position.clone(); at.y = 0.9;
+  for (const p of explode(t.group, ov, pv, rel * 0.45, 0.8, false)) p.v.x += s * rand(5, 14);
+  debris(at, pv.clone().multiplyScalar(0.7), [t.color, 0x222222], 10, 15);
+  for (let i = 0; i < 50; i++) spark(at, pv.clone().multiplyScalar(0.5), 8);
+  P.speed *= 0.94; shake = Math.max(shake, 0.6);
+  scratchCar(s);
+  popup('SCRATCHED!', true); sfxHit(); navigator.vibrate?.(60);
+}
+function scratchCar(s) {
+  const g = P.car.group;
+  for (let i = 0; i < 4; i++) {
+    const c = pick([0x2a2a2a, 0x5a5a5a, 0xbdbdbd]);
+    if (Math.random() < 0.5) box(g, rand(0.2, 0.7), 0.025, 0.02, c, rand(-0.8, 0.8), rand(0.38, 0.55), -3.115).rotation.z = rand(-0.4, 0.4);
+    else box(g, 0.02, 0.025, rand(0.4, 1.4), c, s * 0.99, rand(0.4, 0.75), rand(-2.1, 1.8)).rotation.x = rand(-0.3, 0.3);
+  }
+}
 function crash(other) {
   state = 'crash'; crashT = 0; camOrbit = 0;
   const pv = new V3(P.vx, 0, -P.speed);
@@ -503,8 +708,8 @@ function crash(other) {
   const rel = pv.distanceTo(ov);
   impactKmh = Math.round(rel * 3.6);
   const at = P.car.group.position.clone().lerp(other.group.position, 0.5); at.y = 0.8;
-  playerBody = explode(P.car.group, pv, ov, rel, other.kind === 'bike' ? 0.1 : other.kind === 'truck' ? 0.75 : 0.5, true);
-  explode(other.group, ov, pv, rel, other.kind === 'truck' ? 0.3 : 0.65, false);
+  playerBody = explode(P.car.group, pv, ov, rel, other.kind === 'bike' ? 0.1 : other.kind === 'truck' || other.kind === 'bus' ? 0.75 : 0.5, true)[0];
+  explode(other.group, ov, pv, rel, other.kind === 'truck' || other.kind === 'bus' ? 0.3 : 0.65, false);
   traffic.splice(traffic.indexOf(other), 1);
   const mid = pv.clone().lerp(ov, 0.5);
   debris(at, mid, [P.car.color, other.color, 0x222222], 50, rel);
@@ -539,10 +744,12 @@ function updatePlayer(dt) {
   const base = 40 + 62 * (1 - Math.exp(-dist / 5000)); // ~144 → ~370 km/h
   let target = base + (boosting() ? 28 : 0);
   if (braking()) target = 30;
-  P.speed += (target - P.speed) * Math.min(1, dt * (target > P.speed ? 0.9 : 2.5));
-  const steer = readSteer();
-  const maxLat = 13 + P.speed * 0.07;
-  P.vx += (steer * maxLat - P.vx) * Math.min(1, dt * 9);
+  // after nitro the car coasts down very gradually; only the brake slows it quickly
+  const rate = target > P.speed ? 0.9 : braking() ? 2.5 : 0.1;
+  P.speed += (target - P.speed) * Math.min(1, dt * rate);
+  const steer = readSteer(dt);
+  const maxLat = 11 + P.speed * 0.06;
+  P.vx += (steer * maxLat - P.vx) * Math.min(1, dt * 5);
   P.x += P.vx * dt;
   const lim = RAIL_X - 1.1;
   if (Math.abs(P.x) > lim) { // grinding the guard rail
@@ -582,7 +789,10 @@ function updateTraffic(dt) {
     if (state !== 'play') continue;
     // collision
     const dx = Math.abs(t.group.position.x - P.x), dz = Math.abs(z - P.z);
-    if (dx < (t.w + P.car.w) * 0.45 && dz < (t.l + P.car.l) * 0.45) { crash(t); return; }
+    if (dx < (t.w + P.car.w) * 0.45 && dz < (t.l + P.car.l) * 0.45) {
+      if (t.kind === 'bike' || t.kind === 'moto') { traffic.splice(i, 1); knockAway(t); continue; }
+      crash(t); return;
+    }
     // near miss
     if (!t.passed && z > P.z + t.l / 2) {
       t.passed = true;
@@ -603,7 +813,9 @@ function updateTraffic(dt) {
 
 const tmpQ = new THREE.Quaternion(), tmpE = new THREE.Euler();
 function updateParts(dt) {
-  for (const p of parts) {
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const p = parts[i];
+    if (state === 'play' && p.obj.position.z > P.z + 80) { scene.remove(p.obj); parts.splice(i, 1); continue; }
     p.v.y -= 24 * dt;
     p.obj.position.addScaledVector(p.v, dt);
     tmpE.set(p.w.x * dt, p.w.y * dt, p.w.z * dt); tmpQ.setFromEuler(tmpE); p.obj.quaternion.multiply(tmpQ);
@@ -642,13 +854,20 @@ function updateParticles(dt) {
   flashLight.intensity *= Math.exp(-5 * dt);
 }
 
-function updateScenery() {
+function updateScenery(dt) {
+  for (const t of turbines) t.rotor.rotation.z -= t.spd * dt;
   const pz = P.z;
-  roadGroup.position.z = Math.round(pz / TILE) * TILE - 450;
+  roadGroup.position.z = Math.round(pz / 72) * 72 - 450; // 72 m = common period of road paint, posts, fences, power poles
   ground.position.set(P.x, -0.05, pz);
   far.position.set(0, 0, pz);
   for (const l of lamps) if (l.position.z > pz + 30) l.position.z -= SPAN;
   for (const t of trees) if (t.position.z > pz + 30) placeTree(t, t.position.z - SPAN);
+  for (const p of props) if (p.obj.position.z > pz + p.margin) p.place(p.obj, p.obj.position.z - SPAN);
+  for (const sc of scatters) {
+    let dirty = false;
+    for (let i = 0; i < sc.zs.length; i++) if (sc.zs[i] > pz + 30) { sc.zs[i] -= SPAN; sc.set(i); dirty = true; }
+    if (dirty) { sc.im.instanceMatrix.needsUpdate = true; sc.im.instanceColor.needsUpdate = true; }
+  }
   // speed streaks
   const sp = state === 'play' ? P.speed : 0;
   const arr = streakGeo.attributes.position.array, len = sp * 0.11;
@@ -718,15 +937,15 @@ function tick(rdt) {
   for (const t of traffic) spinWheels(t.group, Math.abs(t.vz), dt);
   updateTraffic(dt);
   if (state === 'crash' || state === 'over') {
-    updateParts(dt);
     // the wreck burns
     if (playerBody && Math.random() < 0.5 * (dt / 0.016)) {
       const p = playerBody.obj.position.clone().add(new V3(rand(-0.6, 0.6), 0.4, rand(-0.6, 0.6)));
       puff(p, Math.random() < 0.45);
     }
   }
+  updateParts(dt);
   updateParticles(dt);
-  updateScenery();
+  updateScenery(dt);
   updateCamera(rdt, dt);
 
   hudT -= rdt;
@@ -746,4 +965,4 @@ document.addEventListener('visibilitychange', () => {
 });
 
 // debug hook for automated testing
-window.__game = { P, get state() { return state; }, get traffic() { return traffic; }, startRun, crash, tick, keys };
+window.__game = { P, get state() { return state; }, get traffic() { return traffic; }, startRun, crash, tick, keys, spawnVehicle };
