@@ -30,6 +30,10 @@
   #mult { position:absolute; bottom:max(20px,env(safe-area-inset-bottom)); left:16px; font-size:18px; font-style:italic;
     color:var(--gold); text-shadow:0 2px 0 #000a; opacity:0; transition:opacity .2s; }
   #mult.on { opacity:1; }
+  #hp { position:absolute; top:max(14px,env(safe-area-inset-top)); left:50%; transform:translateX(-50%); display:flex;
+    align-items:center; gap:8px; font-size:12px; letter-spacing:.15em; font-style:italic; text-shadow:0 2px 0 #000a; }
+  #hpBar { width:min(30vw,160px); height:10px; border-radius:6px; background:#0007; overflow:hidden; box-shadow:0 0 0 2px #fff3; }
+  #hpFill { height:100%; width:100%; background:#4ade80; transition:width .15s, background .3s; }
   #pops { position:absolute; left:0; right:0; top:28%; text-align:center; }
   .pop { font-size:30px; font-style:italic; color:var(--gold); text-shadow:0 3px 0 #000b;
     animation:pop .9s ease-out forwards; }
@@ -64,6 +68,7 @@
 <div id="hud" class="hidden">
   <div id="score"><small>SCORE</small><span id="scoreV">0</span></div>
   <div id="dist"><small>DISTANCE</small><span id="distV">0.0 km</span></div>
+  <div id="hp"><span>CAR</span><div id="hpBar"><div id="hpFill"></div></div></div>
   <div id="mult">ONCOMING LANE ×2</div>
   <div id="pops"></div>
   <div id="speedo"><span id="speed">0</span><small>KM/H</small></div>
@@ -73,8 +78,8 @@
   <h1>REDLINE<br>RUSH</h1>
   <div class="tag">HIGHWAY · FLAT OUT · NO BRAKES</div>
   <button id="startBtn">DRIVE</button>
-  <div class="how" id="howTouch">Tilt your phone to steer.<br><b>Hold the screen</b> for nitro.<br>Weave through traffic in the <b>oncoming lanes</b> for double points.<br>Near misses give bonus points.</div>
-  <div class="how" id="howKeys"><b>← → / A D</b> steer · <b>↑ / W / Space</b> nitro · <b>↓ / S</b> brake<br>Weave through traffic in the <b>oncoming lanes</b> for double points.<br>Near misses give bonus points.</div>
+  <div class="how" id="howTouch">Tilt your phone to steer.<br><b>Hold the screen</b> for nitro.<br>Weave through traffic in the <b>oncoming lanes</b> for double points.<br>Near misses give bonus points.<br>Bump and shove traffic at low speed. A hard, fast hit wrecks you.</div>
+  <div class="how" id="howKeys"><b>← → / A D</b> steer · <b>↑ / W / Space</b> nitro · <b>↓ / S</b> brake<br>Weave through traffic in the <b>oncoming lanes</b> for double points.<br>Near misses give bonus points.<br>Bump and shove traffic at low speed. A hard, fast hit wrecks you.</div>
 </div>
 
 <div id="over" class="panel hidden">

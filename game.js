@@ -498,15 +498,15 @@ function sfxCrash(power) {
     m.connect(mg); mg.connect(ac.destination); m.start(t); m.stop(ts + 0.15);
   }
 }
-function sfxHit() {
+function sfxHit(pw = 1) {
   if (!ac) return; const t = ac.currentTime;
   const o = ac.createOscillator(), og = ac.createGain(); o.type = 'sine';
   o.frequency.setValueAtTime(160, t); o.frequency.exponentialRampToValueAtTime(45, t + 0.25);
-  og.gain.setValueAtTime(0.7, t); og.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
+  og.gain.setValueAtTime(0.7 * pw, t); og.gain.exponentialRampToValueAtTime(0.001, t + 0.3);
   o.connect(og); og.connect(ac.destination); o.start(t); o.stop(t + 0.32);
   const n = ac.createBufferSource(); n.buffer = noiseBuf(0.3);
   const f = ac.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 1500;
-  const g = ac.createGain(); g.gain.setValueAtTime(0.35, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
+  const g = ac.createGain(); g.gain.setValueAtTime(0.35 * pw, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
   n.connect(f); f.connect(g); g.connect(ac.destination); n.start(t);
 }
 function sfxWhoosh() {
@@ -557,14 +557,14 @@ function readSteer(dt) {
   let k = 0;
   if (keys.ArrowLeft || keys.KeyA) k -= 1;
   if (keys.ArrowRight || keys.KeyD) k += 1;
-  keySteer += (k - keySteer) * Math.min(1, dt * (k === 0 ? 8 : 3.5)); // keys ease in instead of snapping
+  keySteer += (k - keySteer) * Math.min(1, dt * (k === 0 ? 8 : 3.7)); // keys ease in instead of snapping
   let s = Math.abs(keySteer) > 0.02 ? keySteer : 0;
   if (s === 0 && tiltRaw != null) {
     let d = tiltRaw - tiltZero;
     if (d > 180) d -= 360; if (d < -180) d += 360;
     d = Math.abs(d) < 2.5 ? 0 : d - Math.sign(d) * 2.5;
-    s = clamp(d / 32, -1, 1);
-    s = Math.sign(s) * Math.abs(s) ** 1.4; // gentle near center, full lock at ~35°
+    s = clamp(d / 30.5, -1, 1); // 5% more sensitive than the original 32° full lock
+    s = Math.sign(s) * Math.abs(s) ** 1.4; // gentle near center, full lock at ~33°
   } else if (s === 0 && tiltRaw == null && touching) {
     s = touchX < innerWidth / 2 ? -1 : 1; // no gyro: touch halves steer
   }
@@ -575,7 +575,8 @@ const braking = () => keys.ArrowDown || keys.KeyS;
 
 // ---------- game state ----------
 let state = 'menu', overReady = false;
-const P = { x: 2, vx: 0, z: 0, speed: 30, car: null };
+const P = { x: 2, vx: 0, z: 0, speed: 30, car: null, hp: 100, yawKick: 0, yawVel: 0 };
+let hitCooldown = 0, scrapeCooldown = 0;
 let traffic = [], parts = [];
 let score = 0, dist = 0, topSpeed = 0, nearMisses = 0, spawnAcc = 0, impactKmh = 0;
 let crashT = 0, timeScale = 1, shake = 0, camOrbit = 0, crashFocus = new V3(), playerBody = null;
@@ -589,11 +590,15 @@ function newPlayer() {
 newPlayer();
 
 const LANES_FWD = [2, 6], LANES_ONC = [-6, -2];
+// rough masses in tonnes; they decide who gets shoved and how hard a hit is
+const MASS = { player: 1.4, car: 1.4, suv: 2.1, van: 2.4, truck: 9, bus: 11, moto: 0.3, bike: 0.1 };
+const CRASH_CLOSING = 22; // m/s (~80 km/h) of nose/tail closing speed = full wreck (less for heavy vehicles)
 function spawnVehicle(x, z, vz, kind) {
   const b = BUILD[kind]();
   if (vz > 0) b.group.rotation.y = Math.PI;
   b.group.position.set(x, 0, z); scene.add(b.group);
-  traffic.push({ ...b, x, vz, kind, passed: false, phase: rand(0, 6) });
+  traffic.push({ ...b, x, lane: x, vx: 0, vz, cruise: vz, yaw: 0, yawVel: 0, disabled: false, baseRot: vz > 0 ? Math.PI : 0,
+    m: MASS[kind], kind, passed: false, phase: rand(0, 6) });
 }
 function spawnRow(diff) {
   const z = P.z - 560;
@@ -629,6 +634,8 @@ function startRun() {
   clearWorld(); newPlayer();
   P.x = 2; P.vx = 0; P.speed = 38;
   score = 0; dist = 0; topSpeed = 0; nearMisses = 0; spawnAcc = 0;
+  $('flash').style.opacity = 0;
+  P.hp = 100; P.yawKick = 0; P.yawVel = 0; hitCooldown = 0; keySteer = 0;
   timeScale = 1; shake = 0; crashT = 0; overReady = false;
   state = 'play';
   $('menu').classList.add('hidden'); $('over').classList.add('hidden'); $('hud').classList.remove('hidden');
@@ -644,6 +651,10 @@ $('startBtn').addEventListener('click', async () => {
 });
 $('againBtn').addEventListener('click', () => { if (overReady) startRun(); });
 
+function updateHpBar() {
+  const f = $('hpFill'); const h = Math.max(0, P.hp);
+  f.style.width = h + '%'; f.style.background = h > 60 ? '#4ade80' : h > 30 ? '#ffd166' : '#ff3b2f';
+}
 function popup(text, hot) {
   const d = document.createElement('div'); d.className = 'pop' + (hot ? ' hot' : ''); d.textContent = text;
   $('pops').appendChild(d); setTimeout(() => d.remove(), 900);
@@ -689,9 +700,11 @@ function knockAway(t) {
   for (const p of explode(t.group, ov, pv, rel * 0.45, 0.8, false)) p.v.x += s * rand(5, 14);
   debris(at, pv.clone().multiplyScalar(0.7), [t.color, 0x222222], 10, 15);
   for (let i = 0; i < 50; i++) spark(at, pv.clone().multiplyScalar(0.5), 8);
-  P.speed *= 0.94; shake = Math.max(shake, 0.6);
+  P.speed *= t.kind === 'moto' ? 0.93 : 0.97; shake = Math.max(shake, 0.6);
+  P.yawVel += -s * 1.5;
   scratchCar(s);
-  popup('SCRATCHED!', true); sfxHit(); navigator.vibrate?.(60);
+  popup(t.kind === 'moto' ? 'BIKER DOWN!' : 'CYCLIST DOWN!', true); sfxHit(0.8); navigator.vibrate?.(60);
+  damage(rel * (t.kind === 'moto' ? 0.12 : 0.04), null);
 }
 function scratchCar(s) {
   const g = P.car.group;
@@ -700,6 +713,11 @@ function scratchCar(s) {
     if (Math.random() < 0.5) box(g, rand(0.2, 0.7), 0.025, 0.02, c, rand(-0.8, 0.8), rand(0.38, 0.55), -3.115).rotation.z = rand(-0.4, 0.4);
     else box(g, 0.02, 0.025, rand(0.4, 1.4), c, s * 0.99, rand(0.4, 0.75), rand(-2.1, 1.8)).rotation.x = rand(-0.3, 0.3);
   }
+}
+function crashSolo() {
+  const ghost = { group: new THREE.Group(), vz: -P.speed * 0.7, kind: 'car', color: 0x333333 };
+  ghost.group.position.set(P.x, 0, P.z - 2); scene.add(ghost.group); traffic.push(ghost);
+  crash(ghost);
 }
 function crash(other) {
   state = 'crash'; crashT = 0; camOrbit = 0;
@@ -710,7 +728,7 @@ function crash(other) {
   const at = P.car.group.position.clone().lerp(other.group.position, 0.5); at.y = 0.8;
   playerBody = explode(P.car.group, pv, ov, rel, other.kind === 'bike' ? 0.1 : other.kind === 'truck' || other.kind === 'bus' ? 0.75 : 0.5, true)[0];
   explode(other.group, ov, pv, rel, other.kind === 'truck' || other.kind === 'bus' ? 0.3 : 0.65, false);
-  traffic.splice(traffic.indexOf(other), 1);
+  if (traffic.includes(other)) traffic.splice(traffic.indexOf(other), 1);
   const mid = pv.clone().lerp(ov, 0.5);
   debris(at, mid, [P.car.color, other.color, 0x222222], 50, rel);
   for (let i = 0; i < 160; i++) spark(at, mid.clone().multiplyScalar(0.6), 14 + rel * 0.1);
@@ -753,6 +771,7 @@ function updatePlayer(dt) {
   P.x += P.vx * dt;
   const lim = RAIL_X - 1.1;
   if (Math.abs(P.x) > lim) { // grinding the guard rail
+    if (Math.abs(P.vx) > 4 && scrapeCooldown <= 0) { damage(Math.abs(P.vx) * 0.6, null); sfxHit(0.4); scrapeCooldown = 0.4; }
     P.x = Math.sign(P.x) * lim; P.vx = 0; P.speed *= 1 - 0.5 * dt; shake = Math.max(shake, 0.25);
     const sp = new V3(P.x + Math.sign(P.x) * 1, 0.6, P.z + rand(-1.5, 1.5));
     for (let i = 0; i < 3; i++) spark(sp, new V3(0, 1, -P.speed * 0.6), 4);
@@ -765,7 +784,14 @@ function updatePlayer(dt) {
 
   const g = P.car.group;
   g.position.set(P.x, 0, P.z);
-  g.rotation.y = -P.vx * 0.022; g.rotation.z = P.vx * 0.008;
+  P.yawVel += (-P.yawKick * 60 - P.yawVel * 9) * dt; P.yawKick += P.yawVel * dt; // impact wobble springs back
+  g.rotation.y = -P.vx * 0.022 + P.yawKick; g.rotation.z = P.vx * 0.008;
+  P.hp = Math.min(100, P.hp + dt * 0.8); // slow self-repair
+  if (P.hp < 45 && Math.random() < (45 - P.hp) / 45 * 0.6) { // damaged engine smokes, then burns
+    const p = g.localToWorld(new V3(rand(-0.4, 0.4), 0.9, -2.4));
+    puff(p, P.hp < 20 && Math.random() < 0.4);
+  }
+  hitCooldown -= dt; scrapeCooldown -= dt;
 
   spawnAcc += P.speed * dt;
   const gap = 78 - diff * 46;
@@ -778,36 +804,140 @@ function updatePlayer(dt) {
   }
 }
 
+function damage(amount, other) {
+  P.hp -= amount;
+  updateHpBar();
+  if (P.hp <= 0 && state === 'play') { P.hp = 0; if (other) crash(other); else crashSolo(); return true; }
+  return false;
+}
+function hitText(text, hot) { if (hitCooldown <= 0) { popup(text, hot); hitCooldown = 0.7; } }
+
+// Contact between the player and a car/van/truck/bus. Returns true if it ended the run.
+function contact(t, rx, rz, ox, oz, dt) {
+  const m1 = MASS.player, m2 = t.m, mt = m1 + m2;
+  const n = Math.sign(rx) || 1;                     // which side the other car is on
+  const vrx = P.vx - t.vx, vrz = t.vz + P.speed;   // relative velocities (other vs player, z)
+  // which axis did we enter last? that's the face we touched
+  const tx = ox / Math.max(Math.abs(vrx), 0.01), tz = oz / Math.max(Math.abs(vrz), 0.01);
+  const fwdOther = -t.vz;                          // other car's speed in our driving direction
+  const at = new V3(P.x + rx / 2, 0.8, P.z + rz / 2);
+
+  if (tx < tz) {
+    // ---- SIDE CONTACT: shove each other sideways and scrape along ----
+    const closing = vrx * n;
+    if (closing > 0) {
+      const j = (1.3 * closing) / (1 / m1 + 1 / m2);
+      P.vx -= (j / m1) * n; t.vx += (j / m2) * n;
+      t.yawVel += n * (j / m2) * 0.12 * (Math.random() < 0.5 ? 1 : -1);
+      P.yawVel -= n * (j / m1) * 0.25;
+      if (closing > 3) { sfxHit(clamp(closing / 15, 0.3, 1)); shake = Math.max(shake, clamp(closing / 15, 0.2, 0.8)); scratchCar(n); }
+      if (closing > 12 && m2 < 4) t.disabled = true; // hit hard enough to spin them out
+      // leaning on a car is free; only a real sideways impact costs health
+      if (closing > 4 && damage((closing - 4) * 1.2 * clamp(m2 / m1, 0.7, 1.6), t)) return true;
+    }
+    // positional push: heavy vehicles barely move, light ones get pushed around
+    P.x -= ox * (m2 / mt) * n; t.x += ox * (m1 / mt) * n;
+    // scraping friction pulls the two speeds together
+    const dv = P.speed - fwdOther, k = Math.min(1, dt * 1.8);
+    P.speed -= dv * k * (m2 / mt); t.vz -= dv * k * (m1 / mt);
+    if (Math.abs(dv) > 40) { // side-scraping an oncoming car at huge closing speed
+      t.disabled = true; t.yawVel += rand(2, 4) * (Math.random() < 0.5 ? 1 : -1);
+      P.yawVel -= n * 3;
+      if (damage(Math.abs(dv) * dt * 6, t)) return true;
+      hitText('MIRROR SMASH!', true);
+    } else if (Math.abs(dv) > 2) {
+      if (Math.abs(dv) > 8 && damage(Math.abs(dv) * dt * 0.6, t)) return true;
+      hitText(closing > 6 ? 'SHOVE!' : 'SIDESWIPE', false);
+    } else if (closing > 2) hitText('SHOVE!', false);
+    if (Math.random() < 0.6) for (let i = 0; i < 4; i++) spark(at, new V3(0, 1, -P.speed * 0.5), 5);
+    return false;
+  }
+
+  // ---- NOSE / TAIL CONTACT ----
+  const closing = vrz * -Math.sign(rz);            // >0 when the gap was shrinking
+  const s = -Math.sign(rz);                          // +1: other is ahead of us
+  if (closing > 0) {
+    const heavy = Math.sqrt(clamp(m2 / m1, 1, 3.2)); // trucks/buses wreck you at lower speed
+    const glancing = ox < 0.5;                        // only the corners touched
+    if (!glancing && closing >= CRASH_CLOSING / heavy) { crash(t); return true; }
+    if (glancing && closing >= CRASH_CLOSING / heavy) {
+      // clipped a corner at speed: violent, but you might ride it out
+      t.disabled = true; t.yawVel += n * rand(3, 6); t.vx += n * rand(4, 8);
+      P.vx -= n * rand(5, 9); P.yawVel -= n * 4; P.speed *= 0.8;
+      for (let i = 0; i < 60; i++) spark(at, new V3(0, 2, -P.speed * 0.5), 10);
+      debris(at, new V3(0, 0, -P.speed * 0.7), [t.color, P.car.color, 0x222222], 12, 30);
+      sfxHit(1); shake = 1; scratchCar(n); navigator.vibrate?.(120);
+      if (damage(18 + closing * 0.3, t)) return true;
+      hitText('CLIPPED IT!', true);
+      return false;
+    }
+    // survivable bump: 1-D collision with a bit of bounce, momentum depends on mass
+    const u1 = P.speed, u2 = fwdOther, e = 0.25, p = m1 * u1 + m2 * u2;
+    const v1 = (p - m2 * e * (u1 - u2)) / mt, v2 = (p + m1 * e * (u1 - u2)) / mt;
+    P.speed = Math.max(8, v1); t.vz = -v2;
+    const hard = closing > 11;
+    if (hard) { t.yawVel += rand(-1, 1) * closing * 0.12; if (closing > 16 && m2 < 4) t.disabled = true; P.yawVel += rand(-1, 1) * 2; }
+    sfxHit(clamp(closing / 20, 0.25, 1)); shake = Math.max(shake, clamp(closing / 18, 0.25, 1));
+    for (let i = 0; i < closing * 2; i++) spark(at, new V3(0, 1, -P.speed * 0.6), 4);
+    if (hard) { scratchCar(n); debris(at, new V3(0, 0, -P.speed), [t.color, 0x222222], 6, 10); navigator.vibrate?.(80); }
+    if (closing > 3 && damage((closing - 3) * 1.5 * clamp(m2 / m1, 0.7, 1.8), t)) return true;
+    hitText(s > 0 ? (hard ? 'SLAMMED!' : 'BUMP') : 'REAR-ENDED!', hard);
+  }
+  // separate along z (mass-weighted)
+  P.z += oz * (m2 / mt) * s; t.group.position.z -= oz * (m1 / mt) * s;
+  return false;
+}
+
 function updateTraffic(dt) {
   for (let i = traffic.length - 1; i >= 0; i--) {
     const t = traffic[i];
     if (state !== 'play') t.vz *= Math.exp(-1.2 * dt); // everyone hits the brakes after a crash
+    // driver AI: return to cruise speed and lane after being bumped; spun-out cars just slide to a stop
+    if (t.disabled) {
+      t.vz *= Math.exp(-0.9 * dt); t.vx *= Math.exp(-1.5 * dt); t.yawVel *= Math.exp(-1.2 * dt);
+    } else {
+      t.vz += (t.cruise - t.vz) * Math.min(1, dt * 0.35);
+      t.vx += ((t.lane - t.x) * 1.6 - t.vx) * Math.min(1, dt * 2.5);
+      t.yawVel += (-t.yaw * 12 - t.yawVel * 5) * dt;
+    }
+    t.x += t.vx * dt; t.yaw += t.yawVel * dt;
+    const lim = RAIL_X - t.w / 2 - 0.1;
+    if (Math.abs(t.x) > lim) { t.x = Math.sign(t.x) * lim; t.vx *= -0.3; }
     t.group.position.z += t.vz * dt;
+    t.group.position.x = t.x; t.group.rotation.y = t.baseRot + t.yaw;
     if (t.kind === 'bike' || t.kind === 'moto') { t.phase += dt * 3; t.group.position.x = t.x + Math.sin(t.phase) * 0.12; t.group.rotation.z = Math.sin(t.phase) * 0.05; }
     const z = t.group.position.z;
     if (z > P.z + 40 || z < P.z - 1100) { scene.remove(t.group); traffic.splice(i, 1); continue; }
     if (state !== 'play') continue;
-    // collision
-    const dx = Math.abs(t.group.position.x - P.x), dz = Math.abs(z - P.z);
-    if (dx < (t.w + P.car.w) * 0.45 && dz < (t.l + P.car.l) * 0.45) {
+    // collision (boxes slightly smaller than the bodies so near misses feel fair)
+    const rx = t.group.position.x - P.x, rz = z - P.z;
+    const hw = (t.w + P.car.w) * 0.46, hl = (t.l + P.car.l) * 0.46;
+    if (Math.abs(rx) < hw && Math.abs(rz) < hl) {
       if (t.kind === 'bike' || t.kind === 'moto') { traffic.splice(i, 1); knockAway(t); continue; }
-      crash(t); return;
+      if (contact(t, rx, rz, hw - Math.abs(rx), hl - Math.abs(rz), dt)) return;
+      t.touched = true;
+      continue;
     }
-    // near miss
+    // near miss (only if we didn't touch it)
     if (!t.passed && z > P.z + t.l / 2) {
       t.passed = true;
-      const gapX = dx - (t.w + P.car.w) / 2;
-      if (gapX < 1.1) {
+      const gapX = Math.abs(rx) - (t.w + P.car.w) / 2;
+      if (gapX < 1.1 && !t.touched) {
         nearMisses++; const bonus = t.vz > 0 ? 500 : 250; score += bonus;
         popup(`NEAR MISS +${bonus}`, t.vz > 0); sfxWhoosh(); shake = Math.max(shake, 0.25);
       }
     }
   }
-  // same-lane vehicles don't drive through each other
+  // traffic queues behind slower (or wrecked) vehicles in its lane instead of driving through them
   for (const a of traffic) for (const b of traffic) {
-    if (a === b || Math.abs(a.x - b.x) > 1.2 || Math.sign(a.vz) !== Math.sign(b.vz)) continue;
-    const ahead = (b.group.position.z - a.group.position.z) * Math.sign(a.vz);
-    if (ahead > 0 && ahead < (a.l + b.l) / 2 + 8 && Math.abs(a.vz) > Math.abs(b.vz)) a.vz = b.vz;
+    if (a === b || a.disabled || !a.cruise || Math.abs(a.x - b.x) > 1.8) continue;
+    const dir = Math.sign(a.cruise);
+    if (!b.disabled && Math.sign(b.vz) !== dir) continue;
+    const ahead = (b.group.position.z - a.group.position.z) * dir;
+    if (ahead > 0 && ahead < (a.l + b.l) / 2 + 10) {
+      const limit = b.disabled ? 0 : Math.abs(b.vz); // stop behind a wreck
+      if (Math.abs(a.vz) > limit) a.vz = dir * limit;
+    }
   }
 }
 
@@ -954,6 +1084,7 @@ function tick(rdt) {
     $('speed').textContent = Math.round(P.speed * 3.6);
     $('scoreV').textContent = Math.floor(score).toLocaleString();
     $('distV').textContent = (dist / 1000).toFixed(1) + ' km';
+    updateHpBar();
   }
   renderer.render(scene, camera);
 }
@@ -965,4 +1096,4 @@ document.addEventListener('visibilitychange', () => {
 });
 
 // debug hook for automated testing
-window.__game = { P, get state() { return state; }, get traffic() { return traffic; }, startRun, crash, tick, keys, spawnVehicle };
+window.__game = { P, contact, get state() { return state; }, get traffic() { return traffic; }, startRun, crash, tick, keys, spawnVehicle };
