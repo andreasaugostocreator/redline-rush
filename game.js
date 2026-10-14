@@ -7,7 +7,7 @@ const pick = (a) => a[(Math.random() * a.length) | 0];
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const $ = (id) => document.getElementById(id);
 const isTouch = matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
-$(isTouch ? 'howKeys' : 'howTouch').classList.add('hidden');
+document.body.classList.add(isTouch ? 'touch' : 'keys');
 
 // ---------- renderer / scene ----------
 const renderer = new THREE.WebGLRenderer({ canvas: $('c'), antialias: true, powerPreference: 'high-performance' });
@@ -581,6 +581,11 @@ let traffic = [], parts = [];
 let score = 0, dist = 0, topSpeed = 0, nearMisses = 0, spawnAcc = 0, impactKmh = 0;
 let crashT = 0, timeScale = 1, shake = 0, camOrbit = 0, crashFocus = new V3(), playerBody = null;
 let best = 0; try { best = +localStorage.getItem('redline-best') || 0; } catch { }
+let wreckCause = '', shoves = 0;
+const NAMES = { car: 'car', suv: 'SUV', van: 'van', truck: 'truck', bus: 'bus' };
+const an = (k) => (/^[aeiouAEIOS]/.test(NAMES[k] || '') ? 'an ' : 'a ') + (NAMES[k] || 'car');
+function showMenuBest() { if (best > 0) { $('menuBest').textContent = best.toLocaleString(); $('menuBestWrap').classList.remove('hidden'); } }
+showMenuBest();
 const camPos = new V3(), camLook = new V3();
 
 function newPlayer() {
@@ -635,6 +640,7 @@ function startRun() {
   P.x = 2; P.vx = 0; P.speed = 38;
   score = 0; dist = 0; topSpeed = 0; nearMisses = 0; spawnAcc = 0;
   $('flash').style.opacity = 0;
+  wreckCause = ''; shoves = 0;
   P.hp = 100; P.yawKick = 0; P.yawVel = 0; hitCooldown = 0; keySteer = 0;
   timeScale = 1; shake = 0; crashT = 0; overReady = false;
   state = 'play';
@@ -654,6 +660,7 @@ $('againBtn').addEventListener('click', () => { if (overReady) startRun(); });
 function updateHpBar() {
   const f = $('hpFill'); const h = Math.max(0, P.hp);
   f.style.width = h + '%'; f.style.background = h > 60 ? '#4ade80' : h > 30 ? '#ffd166' : '#ff3b2f';
+  $('hpChip').classList.toggle('low', h <= 30);
 }
 function popup(text, hot) {
   const d = document.createElement('div'); d.className = 'pop' + (hot ? ' hot' : ''); d.textContent = text;
@@ -704,6 +711,7 @@ function knockAway(t) {
   P.yawVel += -s * 1.5;
   scratchCar(s);
   popup(t.kind === 'moto' ? 'BIKER DOWN!' : 'CYCLIST DOWN!', true); sfxHit(0.8); navigator.vibrate?.(60);
+  wreckCause = t.kind === 'moto' ? 'Totalled after hitting a biker' : 'Totalled after hitting a cyclist';
   damage(rel * (t.kind === 'moto' ? 0.12 : 0.04), null);
 }
 function scratchCar(s) {
@@ -715,11 +723,13 @@ function scratchCar(s) {
   }
 }
 function crashSolo() {
+  wreckCause = wreckCause || 'Your car gave out';
   const ghost = { group: new THREE.Group(), vz: -P.speed * 0.7, kind: 'car', color: 0x333333 };
   ghost.group.position.set(P.x, 0, P.z - 2); scene.add(ghost.group); traffic.push(ghost);
   crash(ghost);
 }
 function crash(other) {
+  if (!wreckCause) wreckCause = other.vz > 0 ? 'Head-on with ' + an(other.kind) : 'Rear-ended ' + an(other.kind);
   state = 'crash'; crashT = 0; camOrbit = 0;
   const pv = new V3(P.vx, 0, -P.speed);
   const ov = new V3(0, 0, other.vz);
@@ -750,7 +760,9 @@ function showOver() {
   if (isBest) { best = s; try { localStorage.setItem('redline-best', best); } catch { } }
   $('oScore').textContent = s.toLocaleString(); $('oBest').textContent = best.toLocaleString();
   $('oDist').textContent = (dist / 1000).toFixed(2) + ' km'; $('oTop').textContent = Math.round(topSpeed * 3.6) + ' km/h';
-  $('oNear').textContent = nearMisses; $('oImpact').textContent = impactKmh + ' km/h';
+  $('oNear').textContent = nearMisses; $('oShoves').textContent = shoves;
+  $('cause').innerHTML = `${wreckCause}<small>${impactKmh} km/h impact</small>`;
+  showMenuBest();
   $('newbest').classList.toggle('hidden', !isBest);
   $('over').classList.remove('hidden');
   setTimeout(() => { overReady = true; }, 600);
@@ -771,7 +783,8 @@ function updatePlayer(dt) {
   P.x += P.vx * dt;
   const lim = RAIL_X - 1.1;
   if (Math.abs(P.x) > lim) { // grinding the guard rail
-    if (Math.abs(P.vx) > 4 && scrapeCooldown <= 0) { damage(Math.abs(P.vx) * 0.6, null); sfxHit(0.4); scrapeCooldown = 0.4; }
+    if (Math.abs(P.vx) > 4 && scrapeCooldown <= 0) {
+      wreckCause = 'Wrecked on the guard rail'; damage(Math.abs(P.vx) * 0.6, null); sfxHit(0.4); scrapeCooldown = 0.4; }
     P.x = Math.sign(P.x) * lim; P.vx = 0; P.speed *= 1 - 0.5 * dt; shake = Math.max(shake, 0.25);
     const sp = new V3(P.x + Math.sign(P.x) * 1, 0.6, P.z + rand(-1.5, 1.5));
     for (let i = 0; i < 3; i++) spark(sp, new V3(0, 1, -P.speed * 0.6), 4);
@@ -780,7 +793,8 @@ function updatePlayer(dt) {
   topSpeed = Math.max(topSpeed, P.speed);
   const oncoming = P.x < -0.5;
   score += P.speed * dt * (oncoming ? 2 : 1);
-  $('mult').classList.toggle('on', oncoming);
+  $('multTag').classList.toggle('on', oncoming);
+  $('nitroTag').classList.toggle('on', boosting());
 
   const g = P.car.group;
   g.position.set(P.x, 0, P.z);
@@ -823,6 +837,7 @@ function contact(t, rx, rz, ox, oz, dt) {
   const at = new V3(P.x + rx / 2, 0.8, P.z + rz / 2);
 
   if (tx < tz) {
+    wreckCause = (t.vz > 0 ? 'Sideswiped an oncoming ' : 'Sideswiped ' + (an(t.kind).startsWith('an') ? 'an ' : 'a ')) + NAMES[t.kind];
     // ---- SIDE CONTACT: shove each other sideways and scrape along ----
     const closing = vrx * n;
     if (closing > 0) {
@@ -859,6 +874,7 @@ function contact(t, rx, rz, ox, oz, dt) {
   if (closing > 0) {
     const heavy = Math.sqrt(clamp(m2 / m1, 1, 3.2)); // trucks/buses wreck you at lower speed
     const glancing = ox < 0.5;                        // only the corners touched
+    wreckCause = glancing && t.vz > 0 ? 'Clipped an oncoming ' + NAMES[t.kind] : t.vz > 0 ? 'Head-on with ' + an(t.kind) : s > 0 ? 'Rear-ended ' + an(t.kind) : 'Hit from behind by ' + an(t.kind);
     if (!glancing && closing >= CRASH_CLOSING / heavy) { crash(t); return true; }
     if (glancing && closing >= CRASH_CLOSING / heavy) {
       // clipped a corner at speed: violent, but you might ride it out
@@ -915,6 +931,7 @@ function updateTraffic(dt) {
     if (Math.abs(rx) < hw && Math.abs(rz) < hl) {
       if (t.kind === 'bike' || t.kind === 'moto') { traffic.splice(i, 1); knockAway(t); continue; }
       if (contact(t, rx, rz, hw - Math.abs(rx), hl - Math.abs(rz), dt)) return;
+      if (!t.touched) shoves++;
       t.touched = true;
       continue;
     }
@@ -1082,6 +1099,7 @@ function tick(rdt) {
   if (state === 'play' && hudT <= 0) {
     hudT = 0.08;
     $('speed').textContent = Math.round(P.speed * 3.6);
+    $('speedFill').style.width = clamp(P.speed * 3.6 / 400, 0, 1) * 100 + '%';
     $('scoreV').textContent = Math.floor(score).toLocaleString();
     $('distV').textContent = (dist / 1000).toFixed(1) + ' km';
     updateHpBar();
